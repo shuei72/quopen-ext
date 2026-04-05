@@ -1,7 +1,7 @@
 {
   "name": "quopen",
   "displayName": "Quopen",
-  "description": "Two-step Quick Open for VS Code: narrow by folder first, then by file.",
+  "description": "Recursive Quick Open for VS Code that lets you narrow by folder before opening a file.",
   "version": "0.0.1",
   "publisher": "shuei",
   "license": "MIT",
