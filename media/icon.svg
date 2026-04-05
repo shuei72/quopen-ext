@@ -1,0 +1,9 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quopen icon">
+  <rect x="10" y="10" width="236" height="236" rx="48" fill="#0f172a"/>
+  <path d="M28 52c0-11.046 8.954-20 20-20h38l18 18h90c11.046 0 20 8.954 20 20v134c0 13.255-10.745 24-24 24H52c-13.255 0-24-10.745-24-24V52Z" fill="#f8fafc"/>
+  <circle cx="72" cy="80" r="24" fill="none" stroke="#0f172a" stroke-width="10"/>
+  <path d="M88 96l14 14" fill="none" stroke="#0f172a" stroke-width="10" stroke-linecap="round"/>
+  <path d="M116 92h62M42 124h136M42 156h136M42 188h104" fill="none" stroke="#0f172a" stroke-width="12" stroke-linecap="round"/>
+  <path d="M168.5 184.8a28 28 0 1 1 1.5 25.2" fill="none" stroke="#fbbf24" stroke-width="14" stroke-linecap="round"/>
+  <path d="M160 230l10 -20 18 12" transform="rotate(-39 170 210)" fill="none" stroke="#fbbf24" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

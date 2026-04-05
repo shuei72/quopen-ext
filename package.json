@@ -1,0 +1,82 @@
+{
+  "name": "quopen",
+  "displayName": "Quopen",
+  "description": "Two-step Quick Open for VS Code: narrow by folder first, then by file.",
+  "version": "0.0.1",
+  "publisher": "shuei",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shuei72/quopen-ext.git"
+  },
+  "homepage": "https://github.com/shuei72/quopen-ext#readme",
+  "bugs": {
+    "url": "https://github.com/shuei72/quopen-ext/issues"
+  },
+  "engines": {
+    "vscode": "^1.108.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "quick open",
+    "quickpick",
+    "folder",
+    "file",
+    "navigation",
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": {
+      "supported": true
+    }
+  },
+  "activationEvents": [
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "quopen.open",
+        "title": "Quick Open by Folder",
+        "category": "Quopen"
+      }
+    ],
+    "configuration": {
+      "title": "Quopen",
+      "properties": {
+        "quopen.searchBackend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "everything",
+            "native"
+          ],
+          "default": "auto",
+          "markdownDescription": "Selects the search backend. `auto` prefers Everything on Windows and falls back to the native workspace index."
+        },
+        "quopen.everythingPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional absolute path to `es.exe` when using the Everything backend."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/vscode": "^1.108.0",
+    "typescript": "^5.4.5"
+  }
+}
