@@ -1,11 +1,15 @@
 {
   "name": "quopen",
   "displayName": "Quopen",
-  "description": "Recursive Quick Open for VS Code that lets you narrow by folder before opening a file.",
+  "description": "Recursive Quick Open for VS Code that helps you narrow by folder before opening a file.",
   "version": "0.0.1",
   "publisher": "shuei",
   "license": "MIT",
   "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1f2933",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/shuei72/quopen-ext.git"
@@ -23,10 +27,14 @@
   "keywords": [
     "quick open",
     "quickpick",
+    "open file",
+    "file picker",
     "folder",
     "file",
     "navigation",
-    "workspace"
+    "workspace",
+    "search",
+    "open"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -81,5 +89,3 @@
     "typescript": "^5.4.5"
   }
 }
-
-

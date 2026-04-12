@@ -1,9 +1,88 @@
-<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quopen icon">
-  <rect x="10" y="10" width="236" height="236" rx="48" fill="#0f172a"/>
-  <path d="M28 52c0-11.046 8.954-20 20-20h38l18 18h90c11.046 0 20 8.954 20 20v134c0 13.255-10.745 24-24 24H52c-13.255 0-24-10.745-24-24V52Z" fill="#f8fafc"/>
-  <circle cx="72" cy="80" r="24" fill="none" stroke="#0f172a" stroke-width="10"/>
-  <path d="M88 96l14 14" fill="none" stroke="#0f172a" stroke-width="10" stroke-linecap="round"/>
-  <path d="M116 92h62M42 124h136M42 156h136M42 188h104" fill="none" stroke="#0f172a" stroke-width="12" stroke-linecap="round"/>
-  <path d="M168.5 184.8a28 28 0 1 1 1.5 25.2" fill="none" stroke="#fbbf24" stroke-width="14" stroke-linecap="round"/>
-  <path d="M160 230l10 -20 18 12" transform="rotate(-39 170 210)" fill="none" stroke="#fbbf24" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quopen shrinking folders icon">
+  <!-- Folder body -->
+  <path
+    d="M12 60
+       C12 48 20 40 32 40
+       H92
+       C102 40 108 43 114 50
+       L126 64
+       H224
+       C236 64 244 72 244 84
+       V196
+       C244 208 236 216 224 216
+       H32
+       C20 216 12 208 12 196
+       Z"
+    fill="#F4C542"
+    stroke="#1F3448"
+    stroke-width="10"
+    stroke-linejoin="round"
+  />
+
+  <!-- Folder top -->
+  <path
+    d="M12 84
+       C12 72 20 64 32 64
+       H224
+       C236 64 244 72 244 84
+       V98
+       H12
+       Z"
+    fill="#FFD86B"
+    stroke="#1F3448"
+    stroke-width="10"
+    stroke-linejoin="round"
+  />
+
+  <!-- Recursive tree -->
+  <path d="M42 110 L42 188" fill="none" stroke="#1F3448" stroke-width="12" stroke-linecap="round"/>
+  <path d="M42 124 L88 124" fill="none" stroke="#1F3448" stroke-width="12" stroke-linecap="round"/>
+  <path d="M42 150 L88 150" fill="none" stroke="#1F3448" stroke-width="12" stroke-linecap="round"/>
+  <path d="M42 176 L88 176" fill="none" stroke="#1F3448" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Tree nodes -->
+  <rect x="86" y="114" width="42" height="20" rx="4" fill="#7EC3FF" stroke="#1F3448" stroke-width="6"/>
+  <rect x="86" y="140" width="42" height="20" rx="4" fill="#7EC3FF" stroke="#1F3448" stroke-width="6"/>
+  <rect x="86" y="166" width="42" height="20" rx="4" fill="#7EC3FF" stroke="#1F3448" stroke-width="6"/>
+
+  <!-- File -->
+  <path
+    d="M156 112
+       H198
+       L216 130
+       V182
+       C216 188 212 192 206 192
+       H156
+       C150 192 146 188 146 182
+       V122
+       C146 116 150 112 156 112
+       Z"
+    fill="#F7FBFF"
+    stroke="#1F3448"
+    stroke-width="8"
+    stroke-linejoin="round"
+  />
+
+  <path
+    d="M198 112
+       V126
+       C198 129 201 132 204 132
+       H216"
+    fill="none"
+    stroke="#1F3448"
+    stroke-width="8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Check -->
+  <path
+    d="M160 154 L174 168 L198 140"
+    fill="none"
+    stroke="#1F3448"
+    stroke-width="10"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
 </svg>
