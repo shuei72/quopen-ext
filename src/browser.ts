@@ -85,9 +85,9 @@ export function buildBrowserItems(
   }));
 
   return [...folders, ...files].sort((left, right) =>
-    (left.description ?? "").localeCompare(right.description ?? "")
+    compareItemKind(left.itemKind, right.itemKind)
+      || (left.description ?? "").localeCompare(right.description ?? "")
       || left.label.localeCompare(right.label)
-      || left.itemKind.localeCompare(right.itemKind)
   );
 }
 
@@ -156,4 +156,12 @@ function isExcludedRelativePath(relativePath: string): boolean {
   return relativePath
     .split("/")
     .some((segment) => EXCLUDED_FOLDER_NAMES.has(segment));
+}
+
+function compareItemKind(left: BrowserQuickPickItem["itemKind"], right: BrowserQuickPickItem["itemKind"]): number {
+  if (left === right) {
+    return 0;
+  }
+
+  return left === "folder" ? -1 : 1;
 }
