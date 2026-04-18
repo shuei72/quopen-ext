@@ -12,11 +12,16 @@ const OPEN_COMMAND = "quopen.open";
 
 let workspaceIndex: WorkspaceIndex | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
+let statusBarItem: vscode.StatusBarItem | undefined;
+let statusBarRefreshNonce = 0;
 
 export function activate(context: vscode.ExtensionContext): void {
   // Keep the extension lightweight: create the shared logger and workspace index once.
   const logger = createLogger();
   workspaceIndex = new WorkspaceIndex(logger);
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  statusBarItem.command = OPEN_COMMAND;
+  context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
     outputChannel!,
@@ -34,13 +39,23 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       workspaceIndex?.invalidate();
+      void refreshStatusBar();
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("quopen.searchBackend") || event.affectsConfiguration("quopen.everythingPath")) {
+        void refreshStatusBar();
+      }
     })
   );
+
+  void refreshStatusBar();
 }
 
 export function deactivate(): void {
   workspaceIndex = undefined;
   outputChannel = undefined;
+  statusBarItem?.dispose();
+  statusBarItem = undefined;
 }
 
 async function openByFolder(): Promise<void> {
@@ -114,6 +129,44 @@ async function resolveSearchBackend(): Promise<SearchBackend> {
   workspaceIndex = index;
   logInfo("Using native workspace index backend.");
   return index;
+}
+
+async function refreshStatusBar(): Promise<void> {
+  const item = statusBarItem;
+  if (!item) {
+    return;
+  }
+
+  const nonce = ++statusBarRefreshNonce;
+  const config = vscode.workspace.getConfiguration("quopen");
+  const configuredMode = config.get<SearchBackendMode>("searchBackend", "auto");
+  const effectiveMode = await resolveEffectiveBackendMode(configuredMode, config.get<string>("everythingPath"));
+
+  if (nonce !== statusBarRefreshNonce || !statusBarItem) {
+    return;
+  }
+
+  item.text = `Quopen: ${effectiveMode === "everything" ? "Everything" : "Native"}`;
+  item.tooltip = effectiveMode === "everything"
+    ? `Quopen is using the Everything backend.\nConfigured mode: ${configuredMode}.`
+    : `Quopen is using the native workspace index.\nConfigured mode: ${configuredMode}.`;
+  item.show();
+}
+
+async function resolveEffectiveBackendMode(
+  configuredMode: SearchBackendMode,
+  everythingPath: string | undefined
+): Promise<"everything" | "native"> {
+  if (configuredMode === "native") {
+    return "native";
+  }
+
+  const everythingBackend = await EverythingBackend.create(everythingPath, {
+    info() {},
+    warning() {}
+  });
+
+  return everythingBackend ? "everything" : "native";
 }
 
 function createLogger(): OutputLogger {
