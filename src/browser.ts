@@ -37,6 +37,7 @@ export type BrowserQuickPickItem = vscode.QuickPickItem & {
   readonly relativePath: string;
   readonly itemKind: "folder" | "file";
   readonly uri?: vscode.Uri;
+  readonly selectionKey: string;
 };
 
 export type FileEntry = {
@@ -56,7 +57,6 @@ export function buildBrowserItems(
   fileEntries: readonly FileEntry[],
   isMultiRoot: boolean
 ): BrowserQuickPickItem[] {
-  // Present folders first and files second, then sort by display path for stable navigation.
   const folders = folderItems.map<BrowserQuickPickItem>((item) => ({
     iconPath: vscode.ThemeIcon.Folder,
     resourceUri: vscode.Uri.file(
@@ -71,7 +71,8 @@ export function buildBrowserItems(
     description: formatPathDescription(item.workspaceFolder, item.folderPath, isMultiRoot),
     workspaceFolder: item.workspaceFolder,
     relativePath: item.folderPath,
-    itemKind: "folder"
+    itemKind: "folder",
+    selectionKey: buildSelectionKey(item.workspaceFolder, item.folderPath, "folder")
   }));
   const files = fileEntries.map<BrowserQuickPickItem>((entry) => ({
     iconPath: vscode.ThemeIcon.File,
@@ -81,14 +82,23 @@ export function buildBrowserItems(
     workspaceFolder: entry.workspaceFolder,
     relativePath: entry.workspaceRelativePath,
     itemKind: "file",
-    uri: entry.uri
+    uri: entry.uri,
+    selectionKey: buildSelectionKey(entry.workspaceFolder, entry.workspaceRelativePath, "file", entry.uri)
   }));
 
-  return [...folders, ...files].sort((left, right) =>
-    compareItemKind(left.itemKind, right.itemKind)
-      || (left.description ?? "").localeCompare(right.description ?? "")
-      || left.label.localeCompare(right.label)
-  );
+  return [...folders, ...files];
+}
+
+export function filterBrowserItems(
+  items: readonly BrowserQuickPickItem[],
+  query: string
+): BrowserQuickPickItem[] {
+  const terms = normalizeQueryTerms(query);
+  if (terms.length === 0) {
+    return [...items];
+  }
+
+  return items.filter((item) => matchesBrowserItem(item, terms));
 }
 
 export function createFileEntry(
@@ -127,14 +137,6 @@ export function compareFileEntries(left: FileEntry, right: FileEntry): number {
     || left.workspaceRelativePath.localeCompare(right.workspaceRelativePath);
 }
 
-export function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
 export function isMaxBufferError(error: unknown): boolean {
   return error instanceof Error
     && "code" in error
@@ -146,9 +148,26 @@ function formatPathDescription(
   relativePath: string,
   isMultiRoot: boolean
 ): string {
-  // In multi-root workspaces, prefix results so the origin stays obvious.
   const normalizedPath = relativePath === ROOT_FOLDER_LABEL ? ROOT_FOLDER_LABEL : relativePath;
-  return isMultiRoot ? `${workspaceFolder.name} / ${normalizedPath}` : normalizedPath;
+  if (!isMultiRoot) {
+    return normalizedPath;
+  }
+
+  return `${normalizedPath} (${workspaceFolder.name})`;
+}
+
+function normalizeQueryTerms(query: string): string[] {
+  return query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((part) => part.length > 0);
+}
+
+function matchesBrowserItem(item: BrowserQuickPickItem, terms: readonly string[]): boolean {
+  const haystack = (item.description ?? "").toLowerCase();
+
+  return terms.every((part) => haystack.includes(part));
 }
 
 function isExcludedRelativePath(relativePath: string): boolean {
@@ -158,10 +177,16 @@ function isExcludedRelativePath(relativePath: string): boolean {
     .some((segment) => EXCLUDED_FOLDER_NAMES.has(segment));
 }
 
-function compareItemKind(left: BrowserQuickPickItem["itemKind"], right: BrowserQuickPickItem["itemKind"]): number {
-  if (left === right) {
-    return 0;
-  }
-
-  return left === "folder" ? -1 : 1;
+function buildSelectionKey(
+  workspaceFolder: vscode.WorkspaceFolder,
+  relativePath: string,
+  itemKind: BrowserQuickPickItem["itemKind"],
+  uri?: vscode.Uri
+): string {
+  return [
+    workspaceFolder.uri.toString(),
+    itemKind,
+    relativePath,
+    uri?.toString() ?? ""
+  ].join("|");
 }

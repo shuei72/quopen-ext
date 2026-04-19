@@ -52,8 +52,50 @@
     "commands": [
       {
         "command": "quopen.open",
-        "title": "Quick Open by Folder",
+        "title": "Browse Workspace",
         "category": "Quopen"
+      },
+      {
+        "command": "quopen.openFromActiveFile",
+        "title": "Start from File",
+        "category": "Quopen"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "quopen.browser.deleteWordLeft",
+        "key": "ctrl+w",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
+      },
+      {
+        "command": "quopen.browser.deleteWordLeft",
+        "key": "ctrl+backspace",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
+      },
+      {
+        "command": "quopen.browser.deleteCharacterLeft",
+        "key": "ctrl+h",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
+      },
+      {
+        "command": "quopen.browser.narrowSelection",
+        "key": "tab",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
+      },
+      {
+        "command": "quopen.browser.up",
+        "key": "ctrl+u",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
+      },
+      {
+        "command": "workbench.action.quickOpenNavigateNextInFilePicker",
+        "key": "ctrl+n",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
+      },
+      {
+        "command": "workbench.action.quickOpenNavigatePreviousInFilePicker",
+        "key": "ctrl+p",
+        "when": "quopen.browserVisible && inQuickInput && quickInputType == 'quickPick'"
       }
     ],
     "configuration": {
@@ -78,6 +120,7 @@
     }
   },
   "scripts": {
+    "clean": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile",

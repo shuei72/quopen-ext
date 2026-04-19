@@ -1,32 +1,56 @@
+import * as path from "path";
 import * as vscode from "vscode";
-import { BrowserQuickPickItem, FolderQuickPickItem } from "./browser";
+import { FolderQuickPickItem } from "./browser";
+import { BrowserSession, createStartFolderFromUri } from "./browserSession";
 import {
   EverythingBackend,
-  OutputLogger,
   SearchBackend,
   SearchBackendMode,
+  resolveSearchBackend,
   WorkspaceIndex
 } from "./backends";
 
 const OPEN_COMMAND = "quopen.open";
+const OPEN_FROM_ACTIVE_FILE_COMMAND = "quopen.openFromActiveFile";
+const BROWSER_UP_COMMAND = "quopen.browser.up";
+const BROWSER_NARROW_SELECTION_COMMAND = "quopen.browser.narrowSelection";
+const BROWSER_DELETE_WORD_LEFT_COMMAND = "quopen.browser.deleteWordLeft";
+const BROWSER_DELETE_CHARACTER_LEFT_COMMAND = "quopen.browser.deleteCharacterLeft";
 
 let workspaceIndex: WorkspaceIndex | undefined;
-let outputChannel: vscode.OutputChannel | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
 let statusBarRefreshNonce = 0;
+let activeBrowserSession: BrowserSession | undefined;
+let cachedEffectiveBackendMode: {
+  readonly key: string;
+  readonly mode: "everything" | "native";
+} | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-  // Keep the extension lightweight: create the shared logger and workspace index once.
-  const logger = createLogger();
-  workspaceIndex = new WorkspaceIndex(logger);
+  // Keep the extension lightweight: create the workspace index once.
+  workspaceIndex = new WorkspaceIndex();
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBarItem.command = OPEN_COMMAND;
   context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
-    outputChannel!,
     vscode.commands.registerCommand(OPEN_COMMAND, async () => {
       await openByFolder();
+    }),
+    vscode.commands.registerCommand(OPEN_FROM_ACTIVE_FILE_COMMAND, async () => {
+      await openFromActiveFile();
+    }),
+    vscode.commands.registerCommand(BROWSER_UP_COMMAND, async () => {
+      await activeBrowserSession?.goUp();
+    }),
+    vscode.commands.registerCommand(BROWSER_NARROW_SELECTION_COMMAND, async () => {
+      await activeBrowserSession?.narrowSelection();
+    }),
+    vscode.commands.registerCommand(BROWSER_DELETE_WORD_LEFT_COMMAND, async () => {
+      activeBrowserSession?.deleteWordLeft();
+    }),
+    vscode.commands.registerCommand(BROWSER_DELETE_CHARACTER_LEFT_COMMAND, async () => {
+      activeBrowserSession?.deleteCharacterLeft();
     }),
     vscode.workspace.onDidCreateFiles((event) => {
       workspaceIndex?.applyCreate(event.files);
@@ -53,12 +77,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   workspaceIndex = undefined;
-  outputChannel = undefined;
+  void setBrowserActive(false);
+  activeBrowserSession?.dispose();
+  activeBrowserSession = undefined;
   statusBarItem?.dispose();
   statusBarItem = undefined;
 }
 
-async function openByFolder(): Promise<void> {
+async function openByFolder(startFolder?: FolderQuickPickItem): Promise<void> {
   // Quopen only works when there is at least one workspace folder to browse.
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -66,69 +92,42 @@ async function openByFolder(): Promise<void> {
     return;
   }
 
-  const backend = await resolveSearchBackend();
-  await backend.ensureReady();
+  const resolution = await resolveSearchBackend(
+    vscode.workspace.getConfiguration("quopen").get<SearchBackendMode>("searchBackend", "auto"),
+    vscode.workspace.getConfiguration("quopen").get<string>("everythingPath"),
+    workspaceIndex
+  );
+  workspaceIndex = resolution.workspaceIndex;
+  if (resolution.warningMessage) {
+    void vscode.window.showWarningMessage(resolution.warningMessage);
+  }
 
-  let currentFolder: FolderQuickPickItem | undefined;
-
-  while (true) {
-    // Each round narrows the search space based on the folder the user picked last.
-    const items = await backend.getBrowserItems(currentFolder, workspaceFolders.length > 1);
-    if (items.length === 0) {
-      const message = currentFolder
-        ? "No files or folders were found in the selected folder."
-        : "No workspace files were found for Quopen.";
-      void vscode.window.showInformationMessage(message);
-      return;
-    }
-
-    const selectedItem = await pickBrowserItem(items, currentFolder);
-    if (!selectedItem) {
-      return;
-    }
-
-    if (selectedItem.itemKind === "file" && selectedItem.uri) {
-      await vscode.window.showTextDocument(selectedItem.uri);
-      return;
-    }
-
-    currentFolder = {
-      label: selectedItem.label,
-      description: selectedItem.description,
-      detail: selectedItem.detail,
-      workspaceFolder: selectedItem.workspaceFolder,
-      folderPath: selectedItem.relativePath,
-      folderKey: `${selectedItem.workspaceFolder.uri.toString()}::${selectedItem.relativePath}`
-    };
+  const backend = resolution.backend;
+  const session = new BrowserSession(backend, workspaceFolders, setBrowserActive, startFolder);
+  activeBrowserSession?.dispose();
+  activeBrowserSession = session;
+  try {
+    await session.start();
+  } catch (error) {
+    session.dispose();
+    throw error;
   }
 }
 
-async function resolveSearchBackend(): Promise<SearchBackend> {
-  const config = vscode.workspace.getConfiguration("quopen");
-  const mode = config.get<SearchBackendMode>("searchBackend", "auto");
-  logInfo(`Resolving search backend (mode=${mode}).`);
-
-  // Prefer Everything on Windows when available, otherwise fall back to the built-in index.
-  if (mode !== "native") {
-    const everythingBackend = await EverythingBackend.create(
-      config.get<string>("everythingPath"),
-      createLogger()
-    );
-    if (everythingBackend) {
-      logInfo(`Using Everything backend (${everythingBackend.executablePath}).`);
-      return everythingBackend;
-    }
-
-    logInfo("Everything backend unavailable. Falling back to native workspace index.");
-    if (mode === "everything") {
-      void vscode.window.showWarningMessage("Quopen could not use Everything. Falling back to the native workspace index.");
-    }
+async function openFromActiveFile(): Promise<void> {
+  const activeFileUri = getActiveFileUri();
+  if (!activeFileUri) {
+    void vscode.window.showWarningMessage("Quopen needs an active file to start from.");
+    return;
   }
 
-  const index = workspaceIndex ?? new WorkspaceIndex(createLogger());
-  workspaceIndex = index;
-  logInfo("Using native workspace index backend.");
-  return index;
+  const startFolder = createStartFolderFromUri(activeFileUri);
+  if (!startFolder) {
+    void vscode.window.showWarningMessage("Quopen could not determine the active file's folder.");
+    return;
+  }
+
+  await openByFolder(startFolder);
 }
 
 async function refreshStatusBar(): Promise<void> {
@@ -140,7 +139,8 @@ async function refreshStatusBar(): Promise<void> {
   const nonce = ++statusBarRefreshNonce;
   const config = vscode.workspace.getConfiguration("quopen");
   const configuredMode = config.get<SearchBackendMode>("searchBackend", "auto");
-  const effectiveMode = await resolveEffectiveBackendMode(configuredMode, config.get<string>("everythingPath"));
+  const everythingPath = config.get<string>("everythingPath");
+  const effectiveMode = await resolveEffectiveBackendModeCached(configuredMode, everythingPath);
 
   if (nonce !== statusBarRefreshNonce || !statusBarItem) {
     return;
@@ -153,6 +153,23 @@ async function refreshStatusBar(): Promise<void> {
   item.show();
 }
 
+async function resolveEffectiveBackendModeCached(
+  configuredMode: SearchBackendMode,
+  everythingPath: string | undefined
+): Promise<"everything" | "native"> {
+  const cacheKey = `${configuredMode}|${everythingPath ?? ""}`;
+  if (cachedEffectiveBackendMode?.key === cacheKey) {
+    return cachedEffectiveBackendMode.mode;
+  }
+
+  const mode = await resolveEffectiveBackendMode(configuredMode, everythingPath);
+  cachedEffectiveBackendMode = {
+    key: cacheKey,
+    mode
+  };
+  return mode;
+}
+
 async function resolveEffectiveBackendMode(
   configuredMode: SearchBackendMode,
   everythingPath: string | undefined
@@ -161,41 +178,58 @@ async function resolveEffectiveBackendMode(
     return "native";
   }
 
-  const everythingBackend = await EverythingBackend.create(everythingPath, {
-    info() {},
-    warning() {}
-  });
+  const everythingBackend = await EverythingBackend.create(everythingPath);
 
   return everythingBackend ? "everything" : "native";
 }
 
-function createLogger(): OutputLogger {
-  // Route status messages to the Quopen output channel so backend decisions stay visible.
-  outputChannel ??= vscode.window.createOutputChannel("Quopen");
-  return {
-    info(message) {
-      outputChannel?.appendLine(`[${new Date().toISOString()}] ${message}`);
-    },
-    warning(message) {
-      outputChannel?.appendLine(`[${new Date().toISOString()}] WARNING: ${message}`);
+async function setBrowserActive(isActive: boolean): Promise<void> {
+  await vscode.commands.executeCommand("setContext", "quopen.browserVisible", isActive);
+}
+
+function getActiveFileUri(): vscode.Uri | undefined {
+  const editorUri = vscode.window.activeTextEditor?.document.uri;
+  if (editorUri && editorUri.scheme === "file") {
+    return editorUri;
+  }
+
+  const tabUri = getTabUri(vscode.window.tabGroups.activeTabGroup.activeTab);
+  if (tabUri) {
+    return tabUri;
+  }
+
+  for (const group of vscode.window.tabGroups.all) {
+    const groupTabUri = getTabUri(group.activeTab);
+    if (groupTabUri) {
+      return groupTabUri;
     }
+  }
+
+  return undefined;
+}
+
+function getTabUri(tab: vscode.Tab | undefined): vscode.Uri | undefined {
+  if (!tab) {
+    return undefined;
+  }
+
+  const input = tab.input as {
+    readonly uri?: vscode.Uri;
+    readonly modified?: { readonly uri?: vscode.Uri };
+    readonly original?: { readonly uri?: vscode.Uri };
   };
-}
 
-function logInfo(message: string): void {
-  outputChannel?.appendLine(`[${new Date().toISOString()}] ${message}`);
-}
+  if (input.uri?.scheme === "file") {
+    return input.uri;
+  }
 
-function pickBrowserItem(
-  items: BrowserQuickPickItem[],
-  currentFolder: FolderQuickPickItem | undefined
-): Thenable<BrowserQuickPickItem | undefined> {
-  // Show the current folder in the picker prompt so users can keep track of the drill-down level.
-  return vscode.window.showQuickPick(items, {
-    matchOnDescription: true,
-    matchOnDetail: false,
-    placeHolder: currentFolder
-      ? `Choose a file or folder in ${currentFolder.label}`
-      : "Choose a file or folder"
-  });
+  if (input.modified?.uri?.scheme === "file") {
+    return input.modified.uri;
+  }
+
+  if (input.original?.uri?.scheme === "file") {
+    return input.original.uri;
+  }
+
+  return undefined;
 }

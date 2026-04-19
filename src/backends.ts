@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import { promisify } from "util";
 import * as vscode from "vscode";
@@ -9,7 +10,6 @@ import {
   createFileEntry,
   FileEntry,
   FolderQuickPickItem,
-  formatError,
   isMaxBufferError,
   ROOT_FOLDER_LABEL,
   WorkspaceFolderIndex
@@ -21,17 +21,50 @@ const EVERYTHING_MAX_BUFFER = 64 * 1024 * 1024;
 
 export type SearchBackendMode = "auto" | "everything" | "native";
 
-export type OutputLogger = {
-  info(message: string): void;
-  warning(message: string): void;
+export type SearchBackendResolution = {
+  readonly backend: SearchBackend;
+  readonly workspaceIndex: WorkspaceIndex;
+  readonly warningMessage?: string;
 };
 
 export interface SearchBackend {
   ensureReady(): Promise<void>;
   getBrowserItems(
     parent: FolderQuickPickItem | undefined,
-    isMultiRoot: boolean
+    isMultiRoot: boolean,
+    query?: string
   ): Promise<BrowserQuickPickItem[]>;
+}
+
+export async function resolveSearchBackend(
+  configuredMode: SearchBackendMode,
+  everythingPath: string | undefined,
+  workspaceIndex: WorkspaceIndex | undefined
+): Promise<SearchBackendResolution> {
+  if (configuredMode !== "native") {
+    const everythingBackend = await EverythingBackend.create(everythingPath);
+    if (everythingBackend) {
+      return {
+        backend: everythingBackend,
+        workspaceIndex: workspaceIndex ?? new WorkspaceIndex()
+      };
+    }
+
+    if (configuredMode === "everything") {
+      const nativeIndex = workspaceIndex ?? new WorkspaceIndex();
+      return {
+        backend: nativeIndex,
+        workspaceIndex: nativeIndex,
+        warningMessage: "Quopen could not use Everything. Falling back to the native workspace index."
+      };
+    }
+  }
+
+  const nativeIndex = workspaceIndex ?? new WorkspaceIndex();
+  return {
+    backend: nativeIndex,
+    workspaceIndex: nativeIndex
+  };
 }
 
 export class WorkspaceIndex implements SearchBackend {
@@ -39,12 +72,9 @@ export class WorkspaceIndex implements SearchBackend {
   private buildPromise: Promise<void> | undefined;
   private initialized = false;
 
-  constructor(private readonly logger: OutputLogger) {}
-
   async ensureReady(): Promise<void> {
     // Build the full workspace map lazily, then reuse it until the workspace changes.
     if (!this.buildPromise) {
-      this.logger.info("Building native workspace index.");
       this.buildPromise = this.rebuild();
     }
 
@@ -53,7 +83,6 @@ export class WorkspaceIndex implements SearchBackend {
 
   invalidate(): void {
     // Any workspace folder change can invalidate the cached native index.
-    this.logger.info("Invalidating native workspace index.");
     this.initialized = false;
     this.buildPromise = undefined;
     this.workspaceIndexes.clear();
@@ -61,7 +90,8 @@ export class WorkspaceIndex implements SearchBackend {
 
   async getBrowserItems(
     parent: FolderQuickPickItem | undefined,
-    isMultiRoot: boolean
+    isMultiRoot: boolean,
+    query?: string
   ): Promise<BrowserQuickPickItem[]> {
     // When a folder is selected, show only its descendants; otherwise show the top level.
     const folderItems = parent
@@ -70,7 +100,8 @@ export class WorkspaceIndex implements SearchBackend {
     const fileEntries = parent
       ? this.getDescendantFileEntries(parent)
       : this.getAllFileEntries();
-    return buildBrowserItems(folderItems, fileEntries, isMultiRoot);
+    const items = buildBrowserItems(folderItems, fileEntries, isMultiRoot);
+    return query ? items.filter((item) => item.description?.toLowerCase().includes(query.toLowerCase()) ?? false) : items;
   }
 
   applyCreate(uris: readonly vscode.Uri[]): void {
@@ -234,7 +265,6 @@ export class WorkspaceIndex implements SearchBackend {
         folderItems.push({
           label: folderPath === ROOT_FOLDER_LABEL ? ROOT_FOLDER_LABEL : path.posix.basename(folderPath),
           description: isMultiRoot ? workspaceIndexEntry.workspaceFolder.name : undefined,
-          detail: folderPath === ROOT_FOLDER_LABEL ? "Workspace root" : folderPath,
           workspaceFolder: workspaceIndexEntry.workspaceFolder,
           folderPath,
           folderKey: `${workspaceIndexEntry.workspaceFolder.uri.toString()}::${folderPath}`
@@ -276,7 +306,6 @@ export class WorkspaceIndex implements SearchBackend {
       descendantFolders.push({
         label: path.posix.basename(folderPath),
         description: parent.description,
-        detail: folderPath,
         workspaceFolder: parent.workspaceFolder,
         folderPath,
         folderKey: `${parent.workspaceFolder.uri.toString()}::${folderPath}`
@@ -313,17 +342,14 @@ export class WorkspaceIndex implements SearchBackend {
 
 export class EverythingBackend implements SearchBackend {
   private constructor(
-    readonly executablePath: string,
-    private readonly logger: OutputLogger
+    readonly executablePath: string
   ) {}
 
   static async create(
-    configuredPath: string | undefined,
-    logger: OutputLogger
+    configuredPath: string | undefined
   ): Promise<EverythingBackend | undefined> {
     // On Windows, probe the configured path first and then the default Everything command.
     if (process.platform !== "win32") {
-      logger.info("Everything backend skipped because platform is not Windows.");
       return undefined;
     }
 
@@ -337,10 +363,9 @@ export class EverythingBackend implements SearchBackend {
           windowsHide: true,
           maxBuffer: EVERYTHING_MAX_BUFFER
         });
-        logger.info(`Everything backend is available via ${candidate}.`);
-        return new EverythingBackend(candidate, logger);
-      } catch (error) {
-        logger.info(`Everything probe failed for ${candidate}: ${formatError(error)}`);
+        return new EverythingBackend(candidate);
+      } catch {
+        continue;
       }
     }
 
@@ -351,103 +376,124 @@ export class EverythingBackend implements SearchBackend {
 
   async getBrowserItems(
     parent: FolderQuickPickItem | undefined,
-    isMultiRoot: boolean
+    isMultiRoot: boolean,
+    query?: string
   ): Promise<BrowserQuickPickItem[]> {
     // Everything returns file paths, so we rebuild the visible folder/file items from them.
     const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
-    const folderItems: FolderQuickPickItem[] = [];
-    const fileEntries: FileEntry[] = [];
+    const items: BrowserQuickPickItem[] = [];
 
     if (!parent) {
-      await Promise.all(workspaceFolders.map(async (workspaceFolder) => {
+      for (const workspaceFolder of workspaceFolders) {
         if (workspaceFolder.uri.scheme !== "file") {
-          return;
+          continue;
         }
 
-        const filePaths = await this.searchFilePaths([
-          "-path",
-          workspaceFolder.uri.fsPath,
-          "/a-d",
-          "-sort",
-          "path"
-        ]);
-        const seenFolders = new Set<string>();
-
+      const filePaths = await this.searchWorkspaceFilePaths(workspaceFolder.uri.fsPath, query);
         for (const filePath of filePaths) {
-          const entry = createFileEntry(workspaceFolder, vscode.Uri.file(filePath));
-          if (!entry) {
+          const item = this.createEverythingItem(workspaceFolder, filePath, isMultiRoot);
+          if (!item) {
             continue;
           }
-
-          fileEntries.push(entry);
-
-          if (!seenFolders.has(entry.folderPath)) {
-            seenFolders.add(entry.folderPath);
-            folderItems.push({
-              label:
-                entry.folderPath === ROOT_FOLDER_LABEL
-                  ? ROOT_FOLDER_LABEL
-                  : path.posix.basename(entry.folderPath),
-              description: isMultiRoot ? workspaceFolder.name : undefined,
-              detail: entry.folderPath === ROOT_FOLDER_LABEL ? "Workspace root" : entry.folderPath,
-              workspaceFolder,
-              folderPath: entry.folderPath,
-              folderKey: `${workspaceFolder.uri.toString()}::${entry.folderPath}`
-            });
-          }
+          items.push(item);
         }
-      }));
+      }
     } else {
       if (parent.workspaceFolder.uri.scheme !== "file") {
         return [];
       }
 
-      const parentPath = parent.folderPath === ROOT_FOLDER_LABEL
-        ? parent.workspaceFolder.uri.fsPath
-        : path.join(parent.workspaceFolder.uri.fsPath, parent.folderPath);
-      const descendantFilePaths = await this.searchFilePaths([
-        "-path",
-        parentPath,
-        "/a-d",
-        "-sort",
-        "path"
-      ]);
-      const seenFolders = new Set<string>();
-      const parentPrefix = parent.folderPath === ROOT_FOLDER_LABEL ? "" : `${parent.folderPath}/`;
-
+      const descendantFilePaths = await this.searchWorkspaceFilePaths(
+        this.resolveWorkspacePath(parent.workspaceFolder, parent.folderPath),
+        query
+      );
       for (const filePath of descendantFilePaths) {
-        const entry = createFileEntry(parent.workspaceFolder, vscode.Uri.file(filePath));
-        if (!entry) {
+        const item = this.createEverythingItem(parent.workspaceFolder, filePath, false);
+        if (!item) {
           continue;
         }
-
-        fileEntries.push(entry);
-
-        if (
-          entry.folderPath !== ROOT_FOLDER_LABEL
-          && entry.folderPath !== parent.folderPath
-          && (parent.folderPath === ROOT_FOLDER_LABEL || entry.folderPath.startsWith(parentPrefix))
-          && !seenFolders.has(entry.folderPath)
-        ) {
-          seenFolders.add(entry.folderPath);
-          folderItems.push({
-            label: path.posix.basename(entry.folderPath),
-            description: parent.description,
-            detail: entry.folderPath,
-            workspaceFolder: parent.workspaceFolder,
-            folderPath: entry.folderPath,
-            folderKey: `${parent.workspaceFolder.uri.toString()}::${entry.folderPath}`
-          });
-        }
+        items.push(item);
       }
     }
 
-    return buildBrowserItems(folderItems, fileEntries, isMultiRoot);
+    return items;
+  }
+
+  private async searchWorkspaceFilePaths(
+    workspacePath: string,
+    query?: string,
+    limit?: number
+  ): Promise<string[]> {
+    const args = [
+      "-p",
+      "-path",
+      workspacePath,
+      "-sort",
+      "path"
+    ];
+
+    if (query) {
+      args.push(...splitSearchQuery(query));
+    }
+
+    if (limit !== undefined) {
+      args.unshift("-n", String(limit));
+    }
+
+    return this.searchFilePaths(args);
+  }
+
+  private resolveWorkspacePath(
+    workspaceFolder: vscode.WorkspaceFolder,
+    folderPath: string
+  ): string {
+    return folderPath === ROOT_FOLDER_LABEL
+      ? workspaceFolder.uri.fsPath
+      : path.join(workspaceFolder.uri.fsPath, folderPath);
+  }
+
+  private createEverythingItem(
+    workspaceFolder: vscode.WorkspaceFolder,
+    absolutePath: string,
+    isMultiRoot: boolean
+  ): BrowserQuickPickItem | undefined {
+    const normalizedAbsolutePath = path.normalize(absolutePath);
+    const workspaceRelativePath = path.relative(workspaceFolder.uri.fsPath, normalizedAbsolutePath).replace(/\\/g, "/");
+    if (!workspaceRelativePath || workspaceRelativePath.startsWith("..")) {
+      return undefined;
+    }
+
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(normalizedAbsolutePath);
+    } catch {
+      return undefined;
+    }
+
+    const isFolder = stat.isDirectory();
+    const itemKind = isFolder ? "folder" : "file";
+    const label = isFolder && workspaceRelativePath === ROOT_FOLDER_LABEL
+      ? workspaceFolder.name
+      : path.posix.basename(workspaceRelativePath);
+    const description = isMultiRoot
+      ? `${workspaceFolder.name} / ${workspaceRelativePath}`
+      : workspaceRelativePath;
+
+    return {
+      iconPath: isFolder ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File,
+      resourceUri: vscode.Uri.file(normalizedAbsolutePath),
+      label,
+      description,
+      workspaceFolder,
+      relativePath: workspaceRelativePath,
+      itemKind,
+      uri: isFolder ? undefined : vscode.Uri.file(normalizedAbsolutePath),
+      selectionKey: `${workspaceFolder.uri.toString()}::${itemKind}::${workspaceRelativePath}`
+    };
   }
 
   private async searchFilePaths(args: readonly string[]): Promise<string[]> {
     // Wrap Everything so callers only deal with trimmed file paths.
-    this.logger.info(`Everything query: ${args.join(" ")}`);
     let stdout: string;
     try {
       const result = await EXEC_FILE(this.executablePath, args, {
@@ -460,16 +506,33 @@ export class EverythingBackend implements SearchBackend {
         const warningMessage =
           `Everything query output exceeded EVERYTHING_MAX_BUFFER (${EVERYTHING_MAX_BUFFER} bytes). `
           + "Consider narrowing the search scope.";
-        this.logger.warning(`${warningMessage} Query: ${args.join(" ")}`);
         void vscode.window.showWarningMessage(warningMessage);
       }
 
       throw error;
     }
 
-    return stdout
+    const lines = stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
+
+    return lines;
   }
+
+}
+
+function compareAbsolutePaths(left: string, right: string): number {
+  return normalizeAbsolutePath(left).localeCompare(normalizeAbsolutePath(right));
+}
+
+function normalizeAbsolutePath(value: string): string {
+  return value.replace(/\\/g, "/").toLowerCase();
+}
+
+function splitSearchQuery(query: string): string[] {
+  return query
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0);
 }
