@@ -2,7 +2,7 @@
   "name": "quopen",
   "displayName": "Quopen",
   "description": "Recursive Quick Open for VS Code that helps you narrow by folder before opening a file.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "shuei",
   "license": "MIT",
   "icon": "media/icon.png",
